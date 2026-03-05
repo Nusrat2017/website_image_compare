@@ -1,4 +1,4 @@
-# Image Similarity Pro — Deep Learning + aHash + ORB (3-stage pipeline)
+# Website Image Compare — Deep Learning + aHash + ORB (3-stage pipeline)
 
 This repo searches for the most similar images in a local image database using a 3-stage ensemble:
 
@@ -7,6 +7,16 @@ This repo searches for the most similar images in a local image database using a
 3) **OpenCV ORB**: keypoint/geometric similarity (reranking)
 
 It prints Top-N matches with score breakdown and shows OpenCV popups + a side-by-side comparison.
+
+## Website testing workflow
+
+This project now supports website screenshot testing:
+
+1) Open a target website URL in an automated Chrome browser
+2) Capture a screenshot
+3) Compare that screenshot against images in `image_database/stored_image`
+4) Show a green popup + visual comparison when a match is found
+5) Show a red popup + visual comparison when no good match is found
 
 ## Folder layout
 
@@ -61,6 +71,28 @@ Optional (same defaults, no behavior change):
 
 ```bash
 python search.py --query test_image/asha2-5R.jpg --limit 10 --filter-size 100
+
+Website screenshot test mode:
+
+```bash
+python search.py --url https://example.com --screenshot-path test_image/site.png --wait-seconds 3
+```
+
+Dedicated website-test entry point (recommended for URL testing):
+
+```bash
+python website_test.py --url https://example.com --screenshot-path test_image/site.png --wait-seconds 3
+```
+
+If you want to see the browser window while capturing:
+
+```bash
+python website_test.py --url https://example.com --headed
+```
+
+Notes:
+- Google Chrome must be installed.
+- First run may download a matching ChromeDriver automatically.
 ```
 
 ## Notes on scores

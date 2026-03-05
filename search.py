@@ -6,6 +6,7 @@ The actual search algorithms are in search_engine.py and utils.py
 
 import argparse
 import os
+from typing import Optional
 from log_utils import log_info, log_ok, log_section, log_warn
 from search_engine import search  # Import the core search function
 from utils import classify_image_content  # For image content analysis
@@ -13,6 +14,7 @@ from visualization import show_side_by_side_comparison  # Image comparison displ
 from negative_search import handle_negative_search_result  # Negative search detection
 from positive_search import handle_positive_search_result  # Positive search detection
 from build_index import needs_reindex, build_index  # Auto-indexing
+from website_capture import capture_website_screenshot
 
 
 def run_search_with_defaults(
@@ -22,13 +24,30 @@ def run_search_with_defaults(
     filter_size: int = 100,
     source_folder: str = "image_database/stored_image",
     similarity_threshold: float = 50.0,
+    url: Optional[str] = None,
+    screenshot_path: str = "test_image/website_capture.png",
+    wait_seconds: float = 2.5,
+    headless: bool = True,
 ):
     """
     Main function to run an image search with default settings.
     Modify these values to search for different images or adjust search behavior.
     """
     # =========================================================================
-    # STEP 0: Auto-indexing - Check if index needs to be updated
+    # STEP 0: Resolve query source (local image or website screenshot)
+    # =========================================================================
+    active_query_path = query_path
+    if url:
+        log_section("WEBSITE CAPTURE")
+        active_query_path = capture_website_screenshot(
+            url=url,
+            output_path=screenshot_path,
+            wait_seconds=wait_seconds,
+            headless=headless,
+        )
+
+    # =========================================================================
+    # STEP 1: Auto-indexing - Check if index needs to be updated
     # =========================================================================
     needs_update, changes = needs_reindex(source_folder, index_folder)
     
@@ -54,15 +73,15 @@ def run_search_with_defaults(
         log_ok(f"Index up to date - {changes['reason']}")
 
     # =========================================================================
-    # STEP 1: Analyze what's in the query image
+    # STEP 2: Analyze what's in the query image
     # =========================================================================
     # Identify the content (e.g., "eyes", "animal", "flower")
     # This helps understand what the deep learning model is looking for
     log_section("QUERY IMAGE CONTENT ANALYSIS")
     try:
         # Get top 5 predictions about what's in the image
-        predictions = classify_image_content(query_path, top_k=5)
-        log_info(f"Query image: {os.path.abspath(query_path)}")
+        predictions = classify_image_content(active_query_path, top_k=5)
+        log_info(f"Query image: {os.path.abspath(active_query_path)}")
         log_info("Detected content:")
         for i, (label, confidence) in enumerate(predictions, 1):
             log_info(f"{i}. {label.replace('_', ' ').title()}: {confidence:.1f}%")
@@ -70,22 +89,22 @@ def run_search_with_defaults(
         log_warn(f"Could not classify image: {e}")
 
     # =========================================================================
-    # STEP 2: Run the 3-stage search pipeline
+    # STEP 3: Run the 3-stage search pipeline
     # =========================================================================
-    results = search(query_path, index_folder, num_results=limit, candidates=filter_size)
+    results = search(active_query_path, index_folder, num_results=limit, candidates=filter_size)
     # this search function is from search_engine.py
 
     # =========================================================================
-    # STEP 3: Display results with all scores
+    # STEP 4: Display results with all scores
     # =========================================================================
     log_section("TOP MATCHING IMAGES")
 
     # Check for negative search result (no good matches)
-    is_negative_match = handle_negative_search_result(results, query_path, similarity_threshold=similarity_threshold)
+    is_negative_match = handle_negative_search_result(results, active_query_path, similarity_threshold=similarity_threshold)
 
     # If it IS a good match, show a green popup (similar to the red popup for negative search)
     if not is_negative_match:
-        handle_positive_search_result(results, query_path, similarity_threshold=similarity_threshold)
+        handle_positive_search_result(results, active_query_path, similarity_threshold=similarity_threshold)
     
     log_info(f"Top {len(results)} matches")
     log_info("Score breakdown:")
@@ -108,7 +127,7 @@ def run_search_with_defaults(
             log_warn(f"{rank:02d}. Hash:{match['hash_similarity_pct']:5.1f}% Deep:{deep_text} ORB:{orb_text} => Combined:{final_score:5.1f}% | {match['path']}")
 
     # =========================================================================
-    # STEP 4: Show side-by-side comparison of query and best match
+    # STEP 5: Show side-by-side comparison of query and best match
     # =========================================================================
     if results:
         log_section("VISUAL COMPARISON")
@@ -121,7 +140,7 @@ def run_search_with_defaults(
             log_info("Displaying query image vs. best match side by side")
         
         # Display side-by-side comparison using OpenCV with difference visualization
-        show_side_by_side_comparison(query_path, results[0]['path'], 
+        show_side_by_side_comparison(active_query_path, results[0]['path'], 
                                      similarity_score=best_match_score,
                                      title="Query vs Best Match")
 
@@ -134,6 +153,10 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(description="Run image similarity search")
     parser.add_argument("--query", default="test_image/asha2-5R.jpg", help="Path to query image")
+    parser.add_argument("--url", default=None, help="Website URL to capture and compare")
+    parser.add_argument("--screenshot-path", default="test_image/website_capture.png", help="Path to save website screenshot")
+    parser.add_argument("--wait-seconds", type=float, default=2.5, help="Wait time after page load before screenshot")
+    parser.add_argument("--headed", action="store_true", help="Run browser with visible window (not headless)")
     parser.add_argument("--index-folder", default="index", help="Index folder path")
     parser.add_argument("--source-folder", default="image_database/stored_image", help="Image database folder")
     parser.add_argument("--limit", type=int, default=10, help="Number of results to return")
@@ -151,4 +174,8 @@ if __name__ == "__main__":
         filter_size=args.filter_size,
         source_folder=args.source_folder,
         similarity_threshold=args.similarity_threshold,
+        url=args.url,
+        screenshot_path=args.screenshot_path,
+        wait_seconds=args.wait_seconds,
+        headless=not args.headed,
     )
