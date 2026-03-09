@@ -1,44 +1,67 @@
 """
-Simple Image Search Runner
-This is the main script you run to search for similar images.
-The actual search algorithms are in search_engine.py and utils.py
+Website image comparison pipeline runner.
+Captures from a website (full page or CSS-selected element) and compares against indexed images.
 """
 
 import argparse
 import os
 from typing import Optional
 from log_utils import log_info, log_ok, log_section, log_warn
-from search_engine import search  # Import the core search function
+from search_engine import search_similar_images  # Import the core search function
 from utils import classify_image_content  # For image content analysis
 from visualization import show_side_by_side_comparison  # Image comparison display
 from negative_search import handle_negative_search_result  # Negative search detection
 from positive_search import handle_positive_search_result  # Positive search detection
 from build_index import needs_reindex, build_index  # Auto-indexing
-from website_capture import capture_website_screenshot
+from website_capture import (
+    capture_website_element_screenshot,
+    capture_website_screenshot,
+    capture_website_xpath_screenshot,
+)
 
 
-def run_search_with_defaults(
-    query_path: str = "test_image/asha2-5R.jpg",
+def run_website_search_pipeline(
     index_folder: str = "index",
     limit: int = 10,
     filter_size: int = 100,
     source_folder: str = "image_database/stored_image",
     similarity_threshold: float = 50.0,
-    url: Optional[str] = None,
+    url: str = "",
     screenshot_path: str = "test_image/website_capture.png",
     wait_seconds: float = 2.5,
     headless: bool = True,
+    capture_selector: Optional[str] = None,
+    capture_xpath: Optional[str] = None,
 ):
     """
-    Main function to run an image search with default settings.
-    Modify these values to search for different images or adjust search behavior.
+    Website-only function to run screenshot capture and image comparison.
     """
     # =========================================================================
-    # STEP 0: Resolve query source (local image or website screenshot)
+    # STEP 0: Capture website screenshot as query image
     # =========================================================================
-    active_query_path = query_path
-    if url:
-        log_section("WEBSITE CAPTURE")
+    if not url or not str(url).strip():
+        raise ValueError("url is required for website-only pipeline")
+    if capture_selector and capture_xpath:
+        raise ValueError("Use either capture_selector or capture_xpath, not both")
+
+    log_section("WEBSITE CAPTURE")
+    if capture_xpath:
+        active_query_path = capture_website_xpath_screenshot(
+            url=url,
+            output_path=screenshot_path,
+            xpath=capture_xpath,
+            wait_seconds=wait_seconds,
+            headless=headless,
+        )
+    elif capture_selector:
+        active_query_path = capture_website_element_screenshot(
+            url=url,
+            output_path=screenshot_path,
+            css_selector=capture_selector,
+            wait_seconds=wait_seconds,
+            headless=headless,
+        )
+    else:
         active_query_path = capture_website_screenshot(
             url=url,
             output_path=screenshot_path,
@@ -91,7 +114,7 @@ def run_search_with_defaults(
     # =========================================================================
     # STEP 3: Run the 3-stage search pipeline
     # =========================================================================
-    results = search(active_query_path, index_folder, num_results=limit, candidates=filter_size)
+    search_results = search_similar_images(active_query_path, index_folder, num_results=limit, candidates=filter_size)
     # this search function is from search_engine.py
 
     # =========================================================================
@@ -100,20 +123,20 @@ def run_search_with_defaults(
     log_section("TOP MATCHING IMAGES")
 
     # Check for negative search result (no good matches)
-    is_negative_match = handle_negative_search_result(results, active_query_path, similarity_threshold=similarity_threshold)
+    is_negative_match = handle_negative_search_result(search_results, active_query_path, similarity_threshold=similarity_threshold)
 
     # If it IS a good match, show a green popup (similar to the red popup for negative search)
     if not is_negative_match:
-        handle_positive_search_result(results, active_query_path, similarity_threshold=similarity_threshold)
+        handle_positive_search_result(search_results, active_query_path, similarity_threshold=similarity_threshold)
     
-    log_info(f"Top {len(results)} matches")
+    log_info(f"Top {len(search_results)} matches")
     log_info("Score breakdown:")
     log_info("- Deep: Content similarity from neural network")
     log_info("- Hash: Average hash (aHash) similarity (structure)")
     log_info("- ORB: Keypoint matching (geometric similarity)")
     log_info("- Combined: Final score (33% each)")
     
-    for rank, match in enumerate(results, 1):
+    for rank, match in enumerate(search_results, 1):
         orb_score = match["orb_score_pct"]
         deep_score = match.get("deep_score_pct", 0.0)
         final_score = match["combined_score"]
@@ -129,33 +152,30 @@ def run_search_with_defaults(
     # =========================================================================
     # STEP 5: Show side-by-side comparison of query and best match
     # =========================================================================
-    if results:
+    if search_results:
         log_section("VISUAL COMPARISON")
         
         # Get similarity score from best match
-        best_match_score = results[0]['combined_score']
+        best_match_score = search_results[0]['combined_score']
         
         # Display message
         if not is_negative_match:
             log_info("Displaying query image vs. best match side by side")
         
         # Display side-by-side comparison using OpenCV with difference visualization
-        show_side_by_side_comparison(active_query_path, results[0]['path'], 
+        show_side_by_side_comparison(active_query_path, search_results[0]['path'], 
                                      similarity_score=best_match_score,
                                      title="Query vs Best Match")
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse optional CLI args.
-
-    Defaults intentionally match previous hardcoded values (no behavior change
-    when running `python search.py` without arguments).
-    """
-    parser = argparse.ArgumentParser(description="Run image similarity search")
-    parser.add_argument("--query", default="test_image/asha2-5R.jpg", help="Path to query image")
-    parser.add_argument("--url", default=None, help="Website URL to capture and compare")
+    """Parse CLI args for website-only search mode."""
+    parser = argparse.ArgumentParser(description="Run website screenshot similarity search")
+    parser.add_argument("--url", required=True, help="Website URL to capture and compare")
     parser.add_argument("--screenshot-path", default="test_image/website_capture.png", help="Path to save website screenshot")
     parser.add_argument("--wait-seconds", type=float, default=2.5, help="Wait time after page load before screenshot")
+    parser.add_argument("--css-selector", default=None, help="Optional CSS selector for element-only screenshot capture")
+    parser.add_argument("--xpath", default=None, help="Optional XPath for element-only screenshot capture")
     parser.add_argument("--headed", action="store_true", help="Run browser with visible window (not headless)")
     parser.add_argument("--index-folder", default="index", help="Index folder path")
     parser.add_argument("--source-folder", default="image_database/stored_image", help="Image database folder")
@@ -167,8 +187,7 @@ def parse_args() -> argparse.Namespace:
 # Entry point: Run the search when this script is executed directly
 if __name__ == "__main__":
     args = parse_args()
-    run_search_with_defaults(
-        query_path=args.query,
+    run_website_search_pipeline(
         index_folder=args.index_folder,
         limit=args.limit,
         filter_size=args.filter_size,
@@ -178,4 +197,10 @@ if __name__ == "__main__":
         screenshot_path=args.screenshot_path,
         wait_seconds=args.wait_seconds,
         headless=not args.headed,
+        capture_selector=args.css_selector,
+        capture_xpath=args.xpath,
     )
+
+
+# Backward-compatible alias for older imports.
+run_search_with_defaults = run_website_search_pipeline

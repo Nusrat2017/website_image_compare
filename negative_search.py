@@ -70,8 +70,8 @@ def show_no_match_popup(best_similarity_score=0.0, query_image_path="", match_im
     cv2.putText(warning_popup_image, warning_title_text, (50, 80), text_font, 1.2, (255, 255, 255), 3)
     
     # Message lines
-    query_size, query_res = get_image_info(query_image_path)
-    match_size, match_res = get_image_info(match_image_path) if match_image_path else ("n/a", "n/a")
+    query_size, query_resolution = get_image_info(query_image_path)
+    match_size, match_resolution = get_image_info(match_image_path) if match_image_path else ("n/a", "n/a")
 
     warning_messages = [
         f"Best match similarity: {best_similarity_score:.1f}%",
@@ -79,8 +79,8 @@ def show_no_match_popup(best_similarity_score=0.0, query_image_path="", match_im
         "This query image does NOT exist in the database.",
         "",
         "Image info:",
-        f"  - Query size: {query_size} | Query resolution: {query_res}",
-        f"  - Match size: {match_size} | Match resolution: {match_res}",
+        f"  - Query size: {query_size} | Query resolution: {query_resolution}",
+        f"  - Match size: {match_size} | Match resolution: {match_resolution}",
         "",
         "Possible reasons:",
         "  - Image was never indexed",

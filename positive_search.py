@@ -50,35 +50,35 @@ def show_match_popup(best_similarity_score=0.0, query_image_path="", match_image
     # White border
     cv2.rectangle(popup, (10, 10), (popup_window_width - 10, popup_window_height - 10), (255, 255, 255), 5)
 
-    font = cv2.FONT_HERSHEY_SIMPLEX
+    text_font = cv2.FONT_HERSHEY_SIMPLEX
 
     title = "MATCH FOUND!"
-    cv2.putText(popup, title, (50, 80), font, 1.4, (255, 255, 255), 3)
+    cv2.putText(popup, title, (50, 80), text_font, 1.4, (255, 255, 255), 3)
 
     query_name = os.path.basename(query_image_path) if query_image_path else "(unknown)"
     match_name = os.path.basename(match_image_path) if match_image_path else "(unknown)"
 
-    query_size, query_res = get_image_info(query_image_path)
-    match_size, match_res = get_image_info(match_image_path)
+    query_size, query_resolution = get_image_info(query_image_path)
+    match_size, match_resolution = get_image_info(match_image_path)
 
-    lines = [
+    popup_lines = [
         f"Best match similarity: {best_similarity_score:.1f}%",
         "",
         f"Query: {query_name}",
-        f"  Size: {query_size} | Resolution: {query_res}",
+        f"  Size: {query_size} | Resolution: {query_resolution}",
         f"Match: {match_name}",
-        f"  Size: {match_size} | Resolution: {match_res}",
+        f"  Size: {match_size} | Resolution: {match_resolution}",
         "",
         "Press any key to close...",
     ]
 
-    y = 160
-    for line in lines:
-        if line == "":
-            y += 12
+    current_y_position = 160
+    for message_line in popup_lines:
+        if message_line == "":
+            current_y_position += 12
             continue
-        cv2.putText(popup, line, (80, y), font, 0.8, (255, 255, 255), 2)
-        y += 45
+        cv2.putText(popup, message_line, (80, current_y_position), text_font, 0.8, (255, 255, 255), 2)
+        current_y_position += 45
 
     cv2.imshow("Search Result - Match Found", popup)
     cv2.waitKey(0)

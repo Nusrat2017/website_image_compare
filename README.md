@@ -1,6 +1,6 @@
-# Website Image Compare — Deep Learning + aHash + ORB (3-stage pipeline)
+# Website Image Compare — Website-Only Pipeline (Deep Learning + aHash + ORB)
 
-This repo searches for the most similar images in a local image database using a 3-stage ensemble:
+This repo captures screenshots from websites and compares them to a local image database using a 3-stage ensemble:
 
 1) **Deep Learning (ResNet18)**: content/semantic similarity (filters candidates)
 2) **Average Hash (aHash)**: fast structural similarity (Hamming distance)
@@ -21,7 +21,7 @@ This project now supports website screenshot testing:
 ## Folder layout
 
 - `image_database/`  → database images (subfolders allowed)
-- `test_image/`      → query images
+- `test_image/`      → captured website screenshots
 - `index/`           → generated index files (rebuild locally)
 - `image_info.py`    → shared image metadata helpers (size/resolution)
 
@@ -41,6 +41,7 @@ python build_index.py
 ```
 
 Creates/updates:
+
 - `index/paths.jsonl`
 - `index/hashes.npy`
 - `index/deep_features.npy`
@@ -48,52 +49,51 @@ Creates/updates:
 
 Note: `index/` is treated as generated output and is ignored by Git in this repo. Rebuild it locally when needed.
 
-## Search
-
-```bash
-python search.py
-```
+## Run Website Tests
 
 What it does:
+
 - Auto-checks whether the index needs rebuilding (new/deleted/renamed images).
+- Captures a website screenshot (full page or selected element).
 - Runs the 3-stage pipeline and prints results.
 - Shows:
-	- Red popup if no good match (below threshold)
-	- Green popup if match found (above threshold)
-	- Side-by-side comparison (Query | Best Match | Differences heatmap)
+  - Red popup if no good match (below threshold)
+  - Green popup if match found (above threshold)
+  - Side-by-side comparison (Query | Best Match | Differences heatmap)
 
-To change the query image and settings, edit the variables near the top of `search.py`:
-- `query_path`
-- `limit`
-- `filter_size`
-
-Optional (same defaults, no behavior change):
-
-```bash
-python search.py --query test_image/asha2-5R.jpg --limit 10 --filter-size 100
-
-Website screenshot test mode:
+Direct website-only runner:
 
 ```bash
 python search.py --url https://example.com --screenshot-path test_image/site.png --wait-seconds 3
+python search.py --url https://example.com --css-selector "footer" --screenshot-path test_image/footer.png
 ```
 
-Dedicated website-test entry point (recommended for URL testing):
+Dedicated website-test entry point (recommended for reusable test cases):
 
 ```bash
-python website_test.py --url https://example.com --screenshot-path test_image/site.png --wait-seconds 3
+python website_test.py --list-test-cases
+python website_test.py --test-case home_page_full
+python website_test.py --test-case footer_image_check
 ```
 
 If you want to see the browser window while capturing:
 
 ```bash
-python website_test.py --url https://example.com --headed
+python website_test.py --test-case footer_image_check --headed
+```
+
+Override test-case defaults from CLI when needed:
+
+```bash
+python website_test.py --test-case footer_image_check --url https://example.com --css-selector "footer img" --wait-seconds 3
 ```
 
 Notes:
+
 - Google Chrome must be installed.
 - First run may download a matching ChromeDriver automatically.
-```
+
+Test-case definitions live in `test_cases/cases.py`. Add new cases there to grow your coverage.
 
 ## Notes on scores
 
@@ -103,10 +103,12 @@ Notes:
 - **Combined %**: final score used for ranking
 
 Scoring behavior when ORB is unavailable:
+
 - If ORB finds keypoints in the query image, combined score uses Deep + Hash + ORB.
 - If ORB is not applicable for tiny/low-detail queries, combined score falls back to Deep + Hash only.
 
 Small/low-resolution query images:
+
 - ORB can fail to find keypoints; in that case ORB is shown as `n/a` and the combined score falls back to Deep+Hash (so ORB does not unfairly penalize matches).
 
 ## Recent cleanup updates
@@ -134,6 +136,7 @@ To keep console output clean and consistent across modules, use shared helpers f
 - `log_error("...")` for hard failures
 
 Conventions:
+
 - Keep messages short and action-focused.
 - Do not mix emoji and plain-text styles in logs.
 - Use one log line per event.

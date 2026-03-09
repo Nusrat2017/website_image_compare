@@ -9,9 +9,9 @@ def format_file_size(num_bytes: int) -> str:
     units = ["B", "KB", "MB", "GB"]
     size = float(num_bytes)
     unit = units[0]
-    for u in units:
-        unit = u
-        if size < 1024.0 or u == units[-1]:
+    for unit_name in units:
+        unit = unit_name
+        if size < 1024.0 or unit_name == units[-1]:
             break
         size /= 1024.0
     if unit == "B":
@@ -27,10 +27,10 @@ def get_image_info(path: str) -> tuple[str, str]:
         size_str = "unknown"
 
     try:
-        img = cv2.imread(path)
-        if img is None:
+        image = cv2.imread(path)
+        if image is None:
             return size_str, "unreadable"
-        h, w = img.shape[:2]
-        return size_str, f"{w}x{h}"
+        height, width = image.shape[:2]
+        return size_str, f"{width}x{height}"
     except Exception:
         return size_str, "unknown"

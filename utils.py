@@ -16,11 +16,11 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 
 def iter_images(folder: str):
     """Iterate through all image files in a folder recursively."""
-    for root, _, files in os.walk(folder):
-        for name in files:
-            ext = os.path.splitext(name.lower())[1]
-            if ext in IMAGE_EXTS:
-                yield os.path.join(root, name)
+    for root_dir, _, file_names in os.walk(folder):
+        for file_name in file_names:
+            file_extension = os.path.splitext(file_name.lower())[1]
+            if file_extension in IMAGE_EXTS:
+                yield os.path.join(root_dir, file_name)
 
 def open_image_rgb(path: str) -> Image.Image:
     """Open an image and convert to RGB format."""
@@ -41,18 +41,18 @@ def resize_max_side(img: Image.Image, max_side: int | None) -> Image.Image:
 
 def load_paths_jsonl(paths_file: str) -> list[str]:
     """Load image paths from JSONL file."""
-    paths: list[str] = []
-    with open(paths_file, "r", encoding="utf-8") as f:
-        for line in f:
-            obj = json.loads(line)
-            paths.append(obj["path"])
-    return paths
+    image_paths: list[str] = []
+    with open(paths_file, "r", encoding="utf-8") as jsonl_file:
+        for line in jsonl_file:
+            entry = json.loads(line)
+            image_paths.append(entry["path"])
+    return image_paths
 
 def save_paths_jsonl(paths_file: str, paths: list[str]):
     """Save image paths to JSONL file."""
-    with open(paths_file, "w", encoding="utf-8") as f:
-        for p in paths:
-            f.write(json.dumps({"path": p}, ensure_ascii=False) + "\n")
+    with open(paths_file, "w", encoding="utf-8") as jsonl_file:
+        for image_path in paths:
+            jsonl_file.write(json.dumps({"path": image_path}, ensure_ascii=False) + "\n")
 
 # =============================================================================
 # ALGORITHM 1: HASH-BASED COMPARISON (Average Hash)
@@ -94,8 +94,8 @@ def hamming_distances_packed(query_hash: np.ndarray, stored_hashes: np.ndarray) 
     stored_hashes:    (N,B)
     returns: (N,) bit distances
     """
-    diff = np.bitwise_xor(stored_hashes, query_hash)  # (N,B)
-    return BIT_COUNT_LOOKUP_TABLE[diff].sum(axis=1).astype(np.int32)
+    xor_diff = np.bitwise_xor(stored_hashes, query_hash)  # (N,B)
+    return BIT_COUNT_LOOKUP_TABLE[xor_diff].sum(axis=1).astype(np.int32)
 
 def dist_to_percent(dist_bits: int, hash_size: int) -> float:
     """Convert bit distance to similarity percentage."""
@@ -110,35 +110,35 @@ def dist_to_percent(dist_bits: int, hash_size: int) -> float:
 
 def orb_rerank(query_path: str, candidate_paths: list[str], max_side: int = 1024, nfeatures: int = 5000) -> list[tuple[str, float]]:
     """Rerank candidate images using ORB feature matching."""
-    query_img = cv2.imread(query_path, cv2.IMREAD_GRAYSCALE)
-    if query_img is None:
+    query_gray_image = cv2.imread(query_path, cv2.IMREAD_GRAYSCALE)
+    if query_gray_image is None:
         raise ValueError(f"Cannot read query image: {query_path}")
 
-    if max_side and max(query_img.shape[:2]) > max_side:
-        scale = max_side / max(query_img.shape[:2])
-        query_img = cv2.resize(query_img, (int(query_img.shape[1] * scale), int(query_img.shape[0] * scale)))
+    if max_side and max(query_gray_image.shape[:2]) > max_side:
+        resize_scale = max_side / max(query_gray_image.shape[:2])
+        query_gray_image = cv2.resize(query_gray_image, (int(query_gray_image.shape[1] * resize_scale), int(query_gray_image.shape[0] * resize_scale)))
 
     detector = cv2.ORB_create(nfeatures=nfeatures, scaleFactor=1.2, nlevels=8, edgeThreshold=15, patchSize=31)
-    query_keypoints, query_descriptors = detector.detectAndCompute(query_img, None)
+    query_keypoints, query_descriptors = detector.detectAndCompute(query_gray_image, None)
     if query_descriptors is None or len(query_keypoints) == 0:
         return [(path, 0.0) for path in candidate_paths]
 
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
 
     results: list[tuple[str, float]] = []
-    for path in candidate_paths:
-        candidate = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-        if candidate is None:
-            results.append((path, 0.0))
+    for candidate_path in candidate_paths:
+        candidate_gray_image = cv2.imread(candidate_path, cv2.IMREAD_GRAYSCALE)
+        if candidate_gray_image is None:
+            results.append((candidate_path, 0.0))
             continue
 
-        if max_side and max(candidate.shape[:2]) > max_side:
-            scale = max_side / max(candidate.shape[:2])
-            candidate = cv2.resize(candidate, (int(candidate.shape[1] * scale), int(candidate.shape[0] * scale)))
+        if max_side and max(candidate_gray_image.shape[:2]) > max_side:
+            resize_scale = max_side / max(candidate_gray_image.shape[:2])
+            candidate_gray_image = cv2.resize(candidate_gray_image, (int(candidate_gray_image.shape[1] * resize_scale), int(candidate_gray_image.shape[0] * resize_scale)))
 
-        candidate_keypoints, candidate_descriptors = detector.detectAndCompute(candidate, None)
+        candidate_keypoints, candidate_descriptors = detector.detectAndCompute(candidate_gray_image, None)
         if candidate_descriptors is None or len(candidate_keypoints) == 0:
-            results.append((path, 0.0))
+            results.append((candidate_path, 0.0))
             continue
 
         all_matches = matcher.knnMatch(query_descriptors, candidate_descriptors, k=2)
@@ -151,7 +151,7 @@ def orb_rerank(query_path: str, candidate_paths: list[str], max_side: int = 1024
         min_count = max(1, min(len(query_descriptors), len(candidate_descriptors)))
         score = (len(good) / min_count) * 100.0
         score = float(max(0.0, min(100.0, score)))
-        results.append((path, score))
+        results.append((candidate_path, score))
 
     results.sort(key=lambda x: x[1], reverse=True)
     return results
@@ -173,35 +173,35 @@ def orb_rerank_with_info(
     Returns:
         (results, query_has_features)
     """
-    query_img = cv2.imread(query_path, cv2.IMREAD_GRAYSCALE)
-    if query_img is None:
+    query_gray_image = cv2.imread(query_path, cv2.IMREAD_GRAYSCALE)
+    if query_gray_image is None:
         raise ValueError(f"Cannot read query image: {query_path}")
 
-    if max_side and max(query_img.shape[:2]) > max_side:
-        scale = max_side / max(query_img.shape[:2])
-        query_img = cv2.resize(query_img, (int(query_img.shape[1] * scale), int(query_img.shape[0] * scale)))
+    if max_side and max(query_gray_image.shape[:2]) > max_side:
+        resize_scale = max_side / max(query_gray_image.shape[:2])
+        query_gray_image = cv2.resize(query_gray_image, (int(query_gray_image.shape[1] * resize_scale), int(query_gray_image.shape[0] * resize_scale)))
 
     detector = cv2.ORB_create(nfeatures=nfeatures, scaleFactor=1.2, nlevels=8, edgeThreshold=15, patchSize=31)
-    query_keypoints, query_descriptors = detector.detectAndCompute(query_img, None)
+    query_keypoints, query_descriptors = detector.detectAndCompute(query_gray_image, None)
     if query_descriptors is None or len(query_keypoints) == 0:
-        return ([(path, 0.0) for path in candidate_paths], False)
+        return ([(candidate_path, 0.0) for candidate_path in candidate_paths], False)
 
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
 
     results: list[tuple[str, float]] = []
-    for path in candidate_paths:
-        candidate = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-        if candidate is None:
-            results.append((path, 0.0))
+    for candidate_path in candidate_paths:
+        candidate_gray_image = cv2.imread(candidate_path, cv2.IMREAD_GRAYSCALE)
+        if candidate_gray_image is None:
+            results.append((candidate_path, 0.0))
             continue
 
-        if max_side and max(candidate.shape[:2]) > max_side:
-            scale = max_side / max(candidate.shape[:2])
-            candidate = cv2.resize(candidate, (int(candidate.shape[1] * scale), int(candidate.shape[0] * scale)))
+        if max_side and max(candidate_gray_image.shape[:2]) > max_side:
+            resize_scale = max_side / max(candidate_gray_image.shape[:2])
+            candidate_gray_image = cv2.resize(candidate_gray_image, (int(candidate_gray_image.shape[1] * resize_scale), int(candidate_gray_image.shape[0] * resize_scale)))
 
-        candidate_keypoints, candidate_descriptors = detector.detectAndCompute(candidate, None)
+        candidate_keypoints, candidate_descriptors = detector.detectAndCompute(candidate_gray_image, None)
         if candidate_descriptors is None or len(candidate_keypoints) == 0:
-            results.append((path, 0.0))
+            results.append((candidate_path, 0.0))
             continue
 
         all_matches = matcher.knnMatch(query_descriptors, candidate_descriptors, k=2)
@@ -214,7 +214,7 @@ def orb_rerank_with_info(
         min_count = max(1, min(len(query_descriptors), len(candidate_descriptors)))
         score = (len(good) / min_count) * 100.0
         score = float(max(0.0, min(100.0, score)))
-        results.append((path, score))
+        results.append((candidate_path, score))
 
     results.sort(key=lambda x: x[1], reverse=True)
     return (results, True)
@@ -311,10 +311,10 @@ def classify_image_content(image_path: str, top_k: int = 5) -> list[tuple[str, f
     labels = weights.meta["categories"]
     
     predictions = []
-    for i in range(top_k):
-        idx = top_idx[i].item()
-        conf = top_probs[i].item() * 100
-        name = labels[idx]
-        predictions.append((name, conf))
+    for rank_index in range(top_k):
+        class_index = top_idx[rank_index].item()
+        confidence_pct = top_probs[rank_index].item() * 100
+        class_name = labels[class_index]
+        predictions.append((class_name, confidence_pct))
     
     return predictions

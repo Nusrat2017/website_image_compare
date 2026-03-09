@@ -34,7 +34,7 @@ def show_side_by_side_comparison(query_image_path, match_image_path, similarity_
             return text
         return text[: max(0, max_chars - 1)] + "…"
 
-    def _put_bottom_right_label(img: np.ndarray, label: str, *, pad: int = 8) -> np.ndarray:
+    def _put_bottom_right_label(image: np.ndarray, label: str, *, pad: int = 8) -> np.ndarray:
         """Draw a readable label in the bottom-right corner of a BGR image."""
         label = _shorten_label(label)
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -42,138 +42,100 @@ def show_side_by_side_comparison(query_image_path, match_image_path, similarity_
         thickness = 2
         (tw, th), baseline = cv2.getTextSize(label, font, font_scale, thickness)
 
-        h, w = img.shape[:2]
-        x2 = max(pad, w - pad)
-        y2 = max(pad, h - pad)
+        image_height, image_width = image.shape[:2]
+        x2 = max(pad, image_width - pad)
+        y2 = max(pad, image_height - pad)
         x1 = max(pad, x2 - tw - (pad * 2))
         y1 = max(pad, y2 - th - baseline - (pad * 2))
 
         # Background rectangle for contrast
-        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 0), -1)
+        cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 0), -1)
         # Text
-        cv2.putText(img, label, (x1 + pad, y2 - pad), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
-        return img
+        cv2.putText(image, label, (x1 + pad, y2 - pad), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+        return image
     
-    # Set maximum display dimensions to fit on screen (adjust as needed)
-    # Keep the old vertical sizing behavior, but reduce horizontal overflow by
-    # constraining each of the 3 side-by-side panels to a max width.
+    # Set maximum display dimensions to fit on screen.
     max_display_height = 800  # Maximum height for the comparison window
     max_display_width = 1400  # Maximum total width for the comparison window
 
     divider_w = 5
-
-    # Choose a target height that keeps Query | Match | Heatmap within max_display_width.
-    # We keep aspect ratio for query/match by shrinking target_height if needed.
     panel_w = max(1, (max_display_width - (2 * divider_w)) // 3)
 
-    def _height_limit(img, max_w: int) -> float:
-        h, w = img.shape[:2]
-        return (h * max_w) / max(1, w)
+    # Use a stable panel height so narrow/wide crops (e.g., footer strips)
+    # don't collapse into unreadable thin visualizations.
+    target_height = min(420, max_display_height)
 
-    target_height = min(
-        max(query_image.shape[0], match_image.shape[0]),
-        max_display_height,
-        int(_height_limit(query_image, panel_w)),
-        int(_height_limit(match_image, panel_w)),
-    )
-    target_height = max(200, int(target_height))
+    def _fit_to_panel(image: np.ndarray, width: int, height: int) -> np.ndarray:
+        """Fit image into a fixed panel using letterboxing while preserving aspect ratio."""
+        ih, iw = image.shape[:2]
+        scale = min(width / max(1, iw), height / max(1, ih))
+        new_w = max(1, int(iw * scale))
+        new_h = max(1, int(ih * scale))
+        resized = cv2.resize(image, (new_w, new_h))
 
-    # Calculate new widths maintaining aspect ratio at the chosen height
-    query_width = max(1, int(query_image.shape[1] * target_height / max(1, query_image.shape[0])))
-    match_width = max(1, int(match_image.shape[1] * target_height / max(1, match_image.shape[0])))
+        panel = np.zeros((height, width, 3), dtype=np.uint8)
+        y0 = (height - new_h) // 2
+        x0 = (width - new_w) // 2
+        panel[y0:y0 + new_h, x0:x0 + new_w] = resized
+        return panel
 
-    # Resize images
-    query_resized = cv2.resize(query_image, (query_width, target_height))
-    match_resized = cv2.resize(match_image, (match_width, target_height))
+    # Normalize both sides to consistent panel size.
+    query_resized = _fit_to_panel(query_image, panel_w, target_height)
+    match_resized = _fit_to_panel(match_image, panel_w, target_height)
     
-    # If not 100% match, create a difference visualization
-    if similarity_score < 100.0:
-        # Resize match image to exact same size as query for pixel-wise comparison
-        match_for_diff = cv2.resize(match_image, (query_resized.shape[1], query_resized.shape[0]))
-        
-        # Calculate absolute difference between images
-        difference = cv2.absdiff(query_resized, match_for_diff)
-        
-        # Convert to grayscale for better visualization
-        difference_gray = cv2.cvtColor(difference, cv2.COLOR_BGR2GRAY)
-        
-        # Threshold to highlight significant differences (adjust threshold as needed)
-        _, threshold_diff = cv2.threshold(difference_gray, 30, 255, cv2.THRESH_BINARY)
-        
-        # Create matching areas mask (inverse of differences)
-        matching_mask = cv2.bitwise_not(threshold_diff)
-        
-        # Create a heatmap of differences (red = different, black = same)
-        difference_heatmap = cv2.applyColorMap(difference_gray, cv2.COLORMAP_HOT)
-        
-        # Create highlighted versions showing both matches (green) and differences (red)
-        query_highlighted = query_resized.copy()
-        match_highlighted = match_for_diff.copy()
-        
-        # Find contours for differences (red outline)
-        diff_contours, _ = cv2.findContours(threshold_diff, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Find contours for matching areas (green overlay)
-        match_contours, _ = cv2.findContours(matching_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Create green overlay for matching areas
-        green_overlay_query = query_resized.copy()
-        green_overlay_match = match_for_diff.copy()
-        cv2.drawContours(green_overlay_query, match_contours, -1, (0, 255, 0), -1)  # Fill with green
-        cv2.drawContours(green_overlay_match, match_contours, -1, (0, 255, 0), -1)  # Fill with green
-        
-        # Blend the green overlay with original images (30% green, 70% original)
-        query_highlighted = cv2.addWeighted(query_resized, 0.7, green_overlay_query, 0.3, 0)
-        match_highlighted = cv2.addWeighted(match_for_diff, 0.7, green_overlay_match, 0.3, 0)
-        
-        # Draw red contours for differences on top
-        cv2.drawContours(query_highlighted, diff_contours, -1, (0, 0, 255), 2)
-        cv2.drawContours(match_highlighted, diff_contours, -1, (0, 0, 255), 2)
-        
-        # Resize difference panel to a fixed panel width (keeps total window width smaller)
-        difference_heatmap_resized = cv2.resize(difference_heatmap, (panel_w, target_height))
+    def _blend_mask(base: np.ndarray, mask: np.ndarray, color: tuple[int, int, int], alpha: float) -> np.ndarray:
+        overlay = base.copy()
+        overlay[mask > 0] = color
+        return cv2.addWeighted(base, 1.0 - alpha, overlay, alpha, 0)
 
-        # Add filename labels at the bottom-right of each panel
-        _put_bottom_right_label(query_highlighted, os.path.basename(query_image_path))
-        _put_bottom_right_label(match_highlighted, os.path.basename(match_image_path))
-        _put_bottom_right_label(difference_heatmap_resized, "Differences")
+    def _add_panel_title(panel: np.ndarray, text: str) -> np.ndarray:
+        title_h = 34
+        strip = np.full((title_h, panel.shape[1], 3), 26, dtype=np.uint8)
+        cv2.putText(strip, text, (10, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (235, 235, 235), 2, cv2.LINE_AA)
+        return np.vstack((strip, panel))
 
-        # Create white dividers
-        white_divider = np.ones((target_height, divider_w, 3), dtype=np.uint8) * 255
+    # Calculate binary masks for matched/unmatched regions.
+    difference = cv2.absdiff(query_resized, match_resized)
+    difference_gray = cv2.cvtColor(difference, cv2.COLOR_BGR2GRAY)
+    difference_gray = cv2.GaussianBlur(difference_gray, (5, 5), 0)
 
-        # Concatenate: Query | Match | Difference Heatmap
-        side_by_side_comparison = np.hstack((
-            query_highlighted,
-            white_divider,
-            match_highlighted,
-            white_divider,
-            difference_heatmap_resized,
-        ))
+    _, unmatched_mask = cv2.threshold(difference_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    kernel = np.ones((3, 3), np.uint8)
+    unmatched_mask = cv2.morphologyEx(unmatched_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    unmatched_mask = cv2.morphologyEx(unmatched_mask, cv2.MORPH_DILATE, kernel, iterations=1)
+    matched_mask = cv2.bitwise_not(unmatched_mask)
 
-        # Add text labels
-        label_font = cv2.FONT_HERSHEY_SIMPLEX
-        query_panel_w = int(query_highlighted.shape[1])
-        match_panel_w = int(match_highlighted.shape[1])
-        heatmap_x0 = query_panel_w + divider_w + match_panel_w + divider_w
-        cv2.putText(side_by_side_comparison, "Query Image", (10, 30), label_font, 0.8, (255, 255, 255), 2)
-        cv2.putText(side_by_side_comparison, "Best Match", (query_width + 15, 30), label_font, 0.8, (255, 255, 255), 2)
-        cv2.putText(side_by_side_comparison, "Differences (Hot)", (heatmap_x0 + 10, 30), label_font, 0.8, (255, 255, 255), 2)
-        cv2.putText(side_by_side_comparison, f"Similarity: {similarity_score:.1f}%", (10, target_height - 10), label_font, 0.8, (0, 255, 255), 2)
-        cv2.putText(side_by_side_comparison, "Green=Match Red=Diff", (10, target_height - 40), label_font, 0.6, (255, 255, 255), 2)
-        
-    else:
-        # For 100% match, just show side by side without difference map
-        white_divider = np.ones((target_height, divider_w, 3), dtype=np.uint8) * 255
+    # Panel 1: plain query image (no overlay).
+    query_plain = query_resized.copy()
 
-        # Add filename labels at the bottom-right of each panel
-        _put_bottom_right_label(query_resized, os.path.basename(query_image_path))
-        _put_bottom_right_label(match_resized, os.path.basename(match_image_path))
+    # Panel 2: best match with only matched regions highlighted.
+    match_with_matched = _blend_mask(match_resized.copy(), matched_mask, (40, 180, 70), 0.30)
 
-        side_by_side_comparison = np.hstack((query_resized, white_divider, match_resized))
-        
-        label_font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(side_by_side_comparison, "Query Image", (10, 30), label_font, 0.8, (0, 255, 0), 2)
-        cv2.putText(side_by_side_comparison, "Best Match - 100% Identical!", (query_width + divider_w + 15, 30), label_font, 0.8, (0, 255, 0), 2)
+    # Panel 3: best match with only unmatched regions highlighted.
+    match_with_unmatched = _blend_mask(match_resized.copy(), unmatched_mask, (40, 40, 230), 0.40)
+    unmatched_contours, _ = cv2.findContours(unmatched_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in unmatched_contours:
+        if cv2.contourArea(contour) < 40:
+            continue
+        cv2.drawContours(match_with_unmatched, [contour], -1, (0, 0, 255), 1)
+
+    _put_bottom_right_label(query_plain, os.path.basename(query_image_path))
+    _put_bottom_right_label(match_with_matched, os.path.basename(match_image_path))
+    _put_bottom_right_label(match_with_unmatched, os.path.basename(match_image_path))
+
+    query_panel = _add_panel_title(query_plain, "Query Image")
+    match_panel = _add_panel_title(match_with_matched, f"Best Match - Matched Parts ({similarity_score:.1f}%)")
+    heat_panel = _add_panel_title(match_with_unmatched, "Best Match - Unmatched Parts")
+
+    divider = np.full((query_panel.shape[0], divider_w, 3), 210, dtype=np.uint8)
+    side_by_side_comparison = np.hstack((query_panel, divider, match_panel, divider, heat_panel))
+
+    # Footer legend bar
+    legend_h = 34
+    legend = np.full((legend_h, side_by_side_comparison.shape[1], 3), 20, dtype=np.uint8)
+    cv2.putText(legend, "Panel 2 (Green): matched regions on best match", (10, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (130, 230, 130), 1, cv2.LINE_AA)
+    cv2.putText(legend, "Panel 3 (Red): unmatched regions on best match", (650, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (120, 120, 255), 1, cv2.LINE_AA)
+    side_by_side_comparison = np.vstack((side_by_side_comparison, legend))
     
     # Scale down the final comparison if it's too wide to fit on screen
     comparison_height, comparison_width = side_by_side_comparison.shape[:2]
@@ -186,13 +148,9 @@ def show_side_by_side_comparison(query_image_path, match_image_path, similarity_
     
     # Display the comparison
     cv2.imshow(title, side_by_side_comparison)
-    if similarity_score < 100.0:
-        log_info("Side-by-side comparison with difference map displayed")
-        log_info("Green tinted areas = Matching regions")
-        log_info("Red outlines = Different regions")
-        log_info("Heatmap: Red/Yellow = Differences, Dark = Same")
-    else:
-        log_info("Perfect match: images are identical")
+    log_info("Side-by-side comparison displayed")
+    log_info("Panel 2 (green) shows matched regions on best match")
+    log_info("Panel 3 (red) shows unmatched regions on best match")
     log_info("Press any key to close")
     cv2.waitKey(0)
     cv2.destroyAllWindows()
