@@ -3,21 +3,7 @@
 Add new cases here as your website test coverage grows.
 """
 
-from dataclasses import dataclass
-from typing import Optional
-
-
-@dataclass(frozen=True)
-class WebsiteTestCase:
-    """Configuration for one website screenshot comparison test."""
-
-    name: str
-    description: str
-    url: str
-    screenshot_path: str
-    wait_seconds: float = 2.5
-    css_selector: Optional[str] = None
-    xpath_selector: Optional[str] = None
+from test_cases.common import WebsiteTestCase
 
 
 WEBSITE_TEST_CASES: dict[str, WebsiteTestCase] = {

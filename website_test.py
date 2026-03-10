@@ -10,7 +10,36 @@ import argparse
 
 from log_utils import log_info, log_section
 from search import run_website_search_pipeline
-from test_cases.cases import get_test_case, list_test_cases
+from test_cases.create_ticket_testcases import (
+    get_test_case as get_create_ticket_test_case,
+    list_test_cases as list_create_ticket_test_cases,
+)
+from test_cases.it4u_home_testcases import (
+    get_test_case as get_it4u_home_test_case,
+    list_test_cases as list_it4u_home_test_cases,
+)
+
+
+def list_test_cases():
+    """Return all website test cases across modules."""
+    return [*list_it4u_home_test_cases(), *list_create_ticket_test_cases()]
+
+
+def get_test_case(name: str):
+    """Fetch a test case by name across all configured modules."""
+    available = []
+    for getter, lister in (
+        (get_it4u_home_test_case, list_it4u_home_test_cases),
+        (get_create_ticket_test_case, list_create_ticket_test_cases),
+    ):
+        available.extend(case.name for case in lister())
+        try:
+            return getter(name)
+        except ValueError:
+            continue
+
+    listed = ", ".join(sorted(set(available)))
+    raise ValueError(f"Unknown test case '{name}'. Available: {listed}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,6 +84,11 @@ def parse_args() -> argparse.Namespace:
         help="Override XPath selector from selected test case (element-only capture)",
     )
     parser.add_argument(
+        "--click-xpath-selector",
+        default=None,
+        help="Override click XPath from selected test case (click and capture opened window)",
+    )
+    parser.add_argument(
         "--headed",
         action="store_true",
         help="Run browser with visible window (default is headless)",
@@ -87,6 +121,8 @@ def _print_test_cases() -> None:
     for test_case in list_test_cases():
         if test_case.xpath_selector:
             selector_text = f"xpath: {test_case.xpath_selector}"
+        elif getattr(test_case, "click_xpath_selector", None):
+            selector_text = f"click xpath + new window: {test_case.click_xpath_selector}"
         elif test_case.css_selector:
             selector_text = f"css: {test_case.css_selector}"
         else:
@@ -117,9 +153,16 @@ def main() -> None:
         wait_seconds = args.wait_seconds if args.wait_seconds is not None else selected_case.wait_seconds
         css_selector = args.css_selector if args.css_selector is not None else selected_case.css_selector
         xpath_selector = args.xpath_selector if args.xpath_selector is not None else selected_case.xpath_selector
+        click_xpath_selector = (
+            args.click_xpath_selector
+            if args.click_xpath_selector is not None
+            else getattr(selected_case, "click_xpath_selector", None)
+        )
 
-        if css_selector and xpath_selector:
-            raise ValueError("Use either css selector or xpath selector, not both")
+        if sum(bool(value) for value in (css_selector, xpath_selector, click_xpath_selector)) > 1:
+            raise ValueError(
+                "Use only one selector mode: css_selector, xpath_selector, or click_xpath_selector"
+            )
 
         log_section("RUNNING WEBSITE TEST CASE")
         log_info(f"Test case: {selected_case.name}")
@@ -127,6 +170,8 @@ def main() -> None:
         log_info(f"URL: {target_url}")
         if xpath_selector:
             capture_text = f"xpath: {xpath_selector}"
+        elif click_xpath_selector:
+            capture_text = f"click xpath + new window: {click_xpath_selector}"
         elif css_selector:
             capture_text = f"css: {css_selector}"
         else:
@@ -145,6 +190,7 @@ def main() -> None:
             headless=not args.headed,
             capture_selector=css_selector,
             capture_xpath=xpath_selector,
+            capture_click_xpath_new_window=click_xpath_selector,
         )
 
 

@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException, WebDriverException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -16,6 +16,22 @@ from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
 from log_utils import log_info, log_ok
+
+
+def _save_full_page_screenshot(browser_driver: webdriver.Chrome, abs_output: str) -> None:
+    """Resize viewport to full page and save screenshot."""
+    total_width = browser_driver.execute_script(
+        "return Math.max(document.body.scrollWidth, document.documentElement.scrollWidth);"
+    )
+    total_height = browser_driver.execute_script(
+        "return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);"
+    )
+    total_width = max(1280, int(total_width or 1280))
+    total_height = max(1080, int(total_height or 1080))
+    browser_driver.set_window_size(total_width, total_height)
+
+    if not browser_driver.save_screenshot(abs_output):
+        raise RuntimeError(f"Could not save screenshot to {abs_output}")
 
 
 def _create_chrome_driver(chrome_options: Options) -> webdriver.Chrome:
@@ -93,16 +109,88 @@ def capture_website_screenshot(
         if wait_seconds > 0:
             time.sleep(wait_seconds)
 
-        total_width = browser_driver.execute_script("return Math.max(document.body.scrollWidth, document.documentElement.scrollWidth);")
-        total_height = browser_driver.execute_script("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);")
-        total_width = max(1280, int(total_width or 1280))
-        total_height = max(1080, int(total_height or 1080))
-        browser_driver.set_window_size(total_width, total_height)
-
-        if not browser_driver.save_screenshot(abs_output):
-            raise RuntimeError(f"Could not save screenshot to {abs_output}")
+        _save_full_page_screenshot(browser_driver, abs_output)
 
         log_ok(f"Website screenshot saved: {abs_output}")
+        return abs_output
+    except WebDriverException as exc:
+        raise RuntimeError(
+            "Website capture failed. Ensure Chrome is installed and driver resolution works. "
+            "If your network blocks downloads, set CHROMEDRIVER_PATH to a local chromedriver.exe."
+        ) from exc
+    finally:
+        if browser_driver is not None:
+            try:
+                browser_driver.quit()
+            except Exception:
+                pass
+
+
+def capture_website_click_xpath_new_window_screenshot(
+    url: str,
+    output_path: str,
+    click_xpath: str,
+    wait_seconds: float = 2.5,
+    headless: bool = True,
+    page_load_timeout: int = 40,
+    element_wait_timeout: int = 12,
+) -> str:
+    """Open URL, click an XPath, switch to new window if opened, and capture full page."""
+    if not click_xpath or not click_xpath.strip():
+        raise ValueError("click_xpath is required for click-and-new-window capture")
+    if not url or not str(url).strip():
+        raise ValueError("URL is required for website screenshot capture")
+
+    normalized_url = url.strip()
+    if not normalized_url.startswith(("http://", "https://")):
+        normalized_url = f"https://{normalized_url}"
+
+    abs_output = os.path.abspath(output_path)
+    os.makedirs(os.path.dirname(abs_output), exist_ok=True)
+
+    chrome_options = Options()
+    if headless:
+        chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--no-sandbox")
+
+    browser_driver = None
+    try:
+        log_info(f"Opening website: {normalized_url}")
+        log_info(f"Checking and clicking xpath: {click_xpath}")
+        browser_driver = _create_chrome_driver(chrome_options)
+        browser_driver.set_page_load_timeout(int(page_load_timeout))
+        browser_driver.get(normalized_url)
+
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+        wait = WebDriverWait(browser_driver, element_wait_timeout)
+        try:
+            target_element = wait.until(EC.element_to_be_clickable((By.XPATH, click_xpath)))
+        except TimeoutException as exc:
+            raise RuntimeError(f"Timed out waiting for clickable element with xpath: {click_xpath}") from exc
+        except NoSuchElementException as exc:
+            raise RuntimeError(f"Could not find element using xpath: {click_xpath}") from exc
+
+        original_handles = list(browser_driver.window_handles)
+        target_element.click()
+
+        try:
+            wait.until(lambda d: len(d.window_handles) > len(original_handles))
+            newest_handle = next(h for h in browser_driver.window_handles if h not in original_handles)
+            browser_driver.switch_to.window(newest_handle)
+            log_info("Switched to newly opened window")
+        except Exception:
+            # Some flows navigate in the same tab; continue capture there.
+            log_info("No new window detected after click; continuing in current window")
+
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+        _save_full_page_screenshot(browser_driver, abs_output)
+        log_ok(f"Post-click window screenshot saved: {abs_output}")
         return abs_output
     except WebDriverException as exc:
         raise RuntimeError(

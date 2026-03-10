@@ -14,6 +14,7 @@ from negative_search import handle_negative_search_result  # Negative search det
 from positive_search import handle_positive_search_result  # Positive search detection
 from build_index import needs_reindex, build_index  # Auto-indexing
 from website_capture import (
+    capture_website_click_xpath_new_window_screenshot,
     capture_website_element_screenshot,
     capture_website_screenshot,
     capture_website_xpath_screenshot,
@@ -32,6 +33,7 @@ def run_website_search_pipeline(
     headless: bool = True,
     capture_selector: Optional[str] = None,
     capture_xpath: Optional[str] = None,
+    capture_click_xpath_new_window: Optional[str] = None,
 ):
     """
     Website-only function to run screenshot capture and image comparison.
@@ -41,11 +43,26 @@ def run_website_search_pipeline(
     # =========================================================================
     if not url or not str(url).strip():
         raise ValueError("url is required for website-only pipeline")
-    if capture_selector and capture_xpath:
-        raise ValueError("Use either capture_selector or capture_xpath, not both")
+    active_selectors = [
+        bool(capture_selector),
+        bool(capture_xpath),
+        bool(capture_click_xpath_new_window),
+    ]
+    if sum(active_selectors) > 1:
+        raise ValueError(
+            "Use only one capture mode: capture_selector, capture_xpath, or capture_click_xpath_new_window"
+        )
 
     log_section("WEBSITE CAPTURE")
-    if capture_xpath:
+    if capture_click_xpath_new_window:
+        active_query_path = capture_website_click_xpath_new_window_screenshot(
+            url=url,
+            output_path=screenshot_path,
+            click_xpath=capture_click_xpath_new_window,
+            wait_seconds=wait_seconds,
+            headless=headless,
+        )
+    elif capture_xpath:
         active_query_path = capture_website_xpath_screenshot(
             url=url,
             output_path=screenshot_path,
@@ -176,6 +193,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wait-seconds", type=float, default=2.5, help="Wait time after page load before screenshot")
     parser.add_argument("--css-selector", default=None, help="Optional CSS selector for element-only screenshot capture")
     parser.add_argument("--xpath", default=None, help="Optional XPath for element-only screenshot capture")
+    parser.add_argument(
+        "--click-xpath",
+        default=None,
+        help="Optional XPath to click before switching to new window and capturing full screenshot",
+    )
     parser.add_argument("--headed", action="store_true", help="Run browser with visible window (not headless)")
     parser.add_argument("--index-folder", default="index", help="Index folder path")
     parser.add_argument("--source-folder", default="image_database/stored_image", help="Image database folder")
@@ -199,6 +221,7 @@ if __name__ == "__main__":
         headless=not args.headed,
         capture_selector=args.css_selector,
         capture_xpath=args.xpath,
+        capture_click_xpath_new_window=args.click_xpath,
     )
 
 
