@@ -10,7 +10,7 @@ from image_info import get_image_info
 from log_utils import log_info, log_warn
 
 
-def check_negative_search(search_results, similarity_threshold=50.0):
+def check_negative_search(search_results, similarity_threshold=70.0):
     """
     Check if search results indicate a negative match (no good matches found).
     
@@ -110,7 +110,7 @@ def show_no_match_popup(best_similarity_score=0.0, query_image_path="", match_im
     cv2.destroyWindow("Search Result - No Match")
 
 
-def handle_negative_search_result(search_results, query_image_path, similarity_threshold=50.0):
+def handle_negative_search_result(search_results, query_image_path, similarity_threshold=70.0):
     """
     Complete handler for negative search results.
     Checks if results are below threshold and displays appropriate warnings.

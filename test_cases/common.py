@@ -1,6 +1,6 @@
 """Shared configuration objects for website test-case modules."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -16,3 +16,5 @@ class WebsiteTestCase:
     css_selector: Optional[str] = None
     xpath_selector: Optional[str] = None
     click_xpath_selector: Optional[str] = None
+    click_opens_new_window: bool = True
+    required_xpaths: list[str] = field(default_factory=list)

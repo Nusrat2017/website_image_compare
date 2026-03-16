@@ -26,7 +26,7 @@ def run_website_search_pipeline(
     limit: int = 10,
     filter_size: int = 100,
     source_folder: str = "image_database/stored_image",
-    similarity_threshold: float = 50.0,
+    similarity_threshold: float = 70.0,
     url: str = "",
     screenshot_path: str = "test_image/website_capture.png",
     wait_seconds: float = 2.5,
@@ -34,6 +34,8 @@ def run_website_search_pipeline(
     capture_selector: Optional[str] = None,
     capture_xpath: Optional[str] = None,
     capture_click_xpath_new_window: Optional[str] = None,
+    click_opens_new_window: bool = True,
+    required_xpaths: Optional[list[str]] = None,
 ):
     """
     Website-only function to run screenshot capture and image comparison.
@@ -59,6 +61,8 @@ def run_website_search_pipeline(
             url=url,
             output_path=screenshot_path,
             click_xpath=capture_click_xpath_new_window,
+            expect_new_window=click_opens_new_window,
+            required_xpaths=required_xpaths,
             wait_seconds=wait_seconds,
             headless=headless,
         )
@@ -203,7 +207,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-folder", default="image_database/stored_image", help="Image database folder")
     parser.add_argument("--limit", type=int, default=10, help="Number of results to return")
     parser.add_argument("--filter-size", type=int, default=100, help="Stage-1 candidate count")
-    parser.add_argument("--similarity-threshold", type=float, default=50.0, help="Threshold for positive/negative result")
+    parser.add_argument("--similarity-threshold", type=float, default=70.0, help="Threshold for positive/negative result")
     return parser.parse_args()
 
 # Entry point: Run the search when this script is executed directly

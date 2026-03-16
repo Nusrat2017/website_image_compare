@@ -1,7 +1,7 @@
 """
 Dedicated entry point for website screenshot test cases.
 
-This runner loads test cases from test_cases/cases.py and supports both:
+This runner loads test cases from modules under test_cases/ and supports both:
 - Full-page screenshot checks
 - Element-level checks (e.g., footer image/logo by CSS selector)
 """
@@ -18,11 +18,19 @@ from test_cases.it4u_home_testcases import (
     get_test_case as get_it4u_home_test_case,
     list_test_cases as list_it4u_home_test_cases,
 )
+from test_cases.security_incident_page_testcases import (
+    get_test_case as get_security_incident_page_test_case,
+    list_test_cases as list_security_incident_page_test_cases,
+)
 
 
 def list_test_cases():
     """Return all website test cases across modules."""
-    return [*list_it4u_home_test_cases(), *list_create_ticket_test_cases()]
+    return [
+        *list_it4u_home_test_cases(),
+        *list_create_ticket_test_cases(),
+        *list_security_incident_page_test_cases(),
+    ]
 
 
 def get_test_case(name: str):
@@ -31,6 +39,7 @@ def get_test_case(name: str):
     for getter, lister in (
         (get_it4u_home_test_case, list_it4u_home_test_cases),
         (get_create_ticket_test_case, list_create_ticket_test_cases),
+        (get_security_incident_page_test_case, list_security_incident_page_test_cases),
     ):
         available.extend(case.name for case in lister())
         try:
@@ -55,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--test-case",
         default=None,
-        help="Optional single test case name from test_cases/cases.py",
+        help="Optional single test case name from test_cases modules",
     )
     parser.add_argument(
         "--url",
@@ -109,7 +118,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--similarity-threshold",
         type=float,
-        default=50.0,
+        default=70.0,
         help="Threshold for positive/negative result",
     )
     return parser.parse_args()
@@ -130,6 +139,8 @@ def _print_test_cases() -> None:
         log_info(f"- {test_case.name}: {test_case.description}")
         log_info(f"  URL: {test_case.url}")
         log_info(f"  Capture: {selector_text}")
+        if getattr(test_case, "required_xpaths", None):
+            log_info(f"  Required xpaths: {len(test_case.required_xpaths)}")
 
 
 def main() -> None:
@@ -158,6 +169,8 @@ def main() -> None:
             if args.click_xpath_selector is not None
             else getattr(selected_case, "click_xpath_selector", None)
         )
+        click_opens_new_window = bool(getattr(selected_case, "click_opens_new_window", True))
+        required_xpaths = list(getattr(selected_case, "required_xpaths", []))
 
         if sum(bool(value) for value in (css_selector, xpath_selector, click_xpath_selector)) > 1:
             raise ValueError(
@@ -171,12 +184,17 @@ def main() -> None:
         if xpath_selector:
             capture_text = f"xpath: {xpath_selector}"
         elif click_xpath_selector:
-            capture_text = f"click xpath + new window: {click_xpath_selector}"
+            if click_opens_new_window:
+                capture_text = f"click xpath + new window: {click_xpath_selector}"
+            else:
+                capture_text = f"click xpath + same window navigation: {click_xpath_selector}"
         elif css_selector:
             capture_text = f"css: {css_selector}"
         else:
             capture_text = "<full page>"
         log_info(f"Capture selector: {capture_text}")
+        if required_xpaths:
+            log_info(f"Required xpaths to validate: {len(required_xpaths)}")
 
         run_website_search_pipeline(
             index_folder=args.index_folder,
@@ -191,6 +209,8 @@ def main() -> None:
             capture_selector=css_selector,
             capture_xpath=xpath_selector,
             capture_click_xpath_new_window=click_xpath_selector,
+            click_opens_new_window=click_opens_new_window,
+            required_xpaths=required_xpaths,
         )
 
 

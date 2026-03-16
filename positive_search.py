@@ -14,7 +14,7 @@ from image_info import get_image_info
 from log_utils import log_ok
 
 
-def check_positive_search(search_results, similarity_threshold=50.0):
+def check_positive_search(search_results, similarity_threshold=70.0):
     """Check if search results indicate a positive match (good match found).
 
     Args:
@@ -85,7 +85,7 @@ def show_match_popup(best_similarity_score=0.0, query_image_path="", match_image
     cv2.destroyWindow("Search Result - Match Found")
 
 
-def handle_positive_search_result(search_results, query_image_path, similarity_threshold=50.0):
+def handle_positive_search_result(search_results, query_image_path, similarity_threshold=70.0):
     """Complete handler for positive search results.
 
     Shows a green popup when the best match is >= threshold.

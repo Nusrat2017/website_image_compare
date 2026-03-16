@@ -5,6 +5,7 @@ Website screenshot capture helpers for website testing workflows.
 import os
 import time
 from pathlib import Path
+from typing import Optional
 
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
@@ -130,12 +131,14 @@ def capture_website_click_xpath_new_window_screenshot(
     url: str,
     output_path: str,
     click_xpath: str,
+    expect_new_window: bool = True,
+    required_xpaths: Optional[list[str]] = None,
     wait_seconds: float = 2.5,
     headless: bool = True,
     page_load_timeout: int = 40,
     element_wait_timeout: int = 12,
 ) -> str:
-    """Open URL, click an XPath, switch to new window if opened, and capture full page."""
+    """Open URL, click an XPath, optionally switch window, and capture full page."""
     if not click_xpath or not click_xpath.strip():
         raise ValueError("click_xpath is required for click-and-new-window capture")
     if not url or not str(url).strip():
@@ -167,27 +170,99 @@ def capture_website_click_xpath_new_window_screenshot(
             time.sleep(wait_seconds)
 
         wait = WebDriverWait(browser_driver, element_wait_timeout)
-        try:
-            target_element = wait.until(EC.element_to_be_clickable((By.XPATH, click_xpath)))
-        except TimeoutException as exc:
-            raise RuntimeError(f"Timed out waiting for clickable element with xpath: {click_xpath}") from exc
-        except NoSuchElementException as exc:
-            raise RuntimeError(f"Could not find element using xpath: {click_xpath}") from exc
+
+        def _resolve_click_target(wait_obj: WebDriverWait):
+            """Resolve a robust click target in current frame context."""
+            try:
+                return wait_obj.until(EC.element_to_be_clickable((By.XPATH, click_xpath)))
+            except Exception:
+                pass
+
+            try:
+                label_element = wait_obj.until(EC.presence_of_element_located((By.XPATH, click_xpath)))
+            except Exception:
+                return None
+
+            # If text node/tag isn't directly clickable, click nearest interactive ancestor.
+            for rel_xpath in (
+                "./ancestor::a[1]",
+                "./ancestor::button[1]",
+                "./ancestor::*[@role='button'][1]",
+            ):
+                try:
+                    return label_element.find_element(By.XPATH, rel_xpath)
+                except NoSuchElementException:
+                    continue
+            return label_element
+
+        browser_driver.switch_to.default_content()
+        target_element = _resolve_click_target(wait)
+
+        if target_element is None:
+            iframe_candidates = browser_driver.find_elements(By.TAG_NAME, "iframe")
+            for index, iframe_element in enumerate(iframe_candidates, start=1):
+                browser_driver.switch_to.default_content()
+                browser_driver.switch_to.frame(iframe_element)
+                frame_wait = WebDriverWait(browser_driver, max(3, element_wait_timeout // 2))
+                target_element = _resolve_click_target(frame_wait)
+                if target_element is not None:
+                    log_info(f"Found click target inside iframe #{index}")
+                    break
+
+        if target_element is None:
+            raise RuntimeError(f"Timed out waiting for clickable element with xpath: {click_xpath}")
 
         original_handles = list(browser_driver.window_handles)
-        target_element.click()
+        try:
+            browser_driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_element)
+            time.sleep(0.2)
+        except Exception:
+            pass
 
         try:
-            wait.until(lambda d: len(d.window_handles) > len(original_handles))
-            newest_handle = next(h for h in browser_driver.window_handles if h not in original_handles)
-            browser_driver.switch_to.window(newest_handle)
-            log_info("Switched to newly opened window")
+            target_element.click()
         except Exception:
-            # Some flows navigate in the same tab; continue capture there.
-            log_info("No new window detected after click; continuing in current window")
+            browser_driver.execute_script("arguments[0].click();", target_element)
+
+        if expect_new_window:
+            try:
+                wait.until(lambda d: len(d.window_handles) > len(original_handles))
+                newest_handle = next(h for h in browser_driver.window_handles if h not in original_handles)
+                browser_driver.switch_to.window(newest_handle)
+                log_info("Switched to newly opened window")
+            except Exception:
+                # Some flows navigate in the same tab; continue capture there.
+                log_info("No new window detected after click; continuing in current window")
+        else:
+            log_info("Configured for same-window navigation after click")
+            try:
+                wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+            except Exception:
+                # Continue even if the page stays dynamic.
+                pass
 
         if wait_seconds > 0:
             time.sleep(wait_seconds)
+
+        try:
+            browser_driver.switch_to.default_content()
+        except Exception:
+            pass
+
+        missing_xpaths: list[str] = []
+        for xpath in required_xpaths or []:
+            try:
+                wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
+                log_info(f"Validated required xpath: {xpath}")
+            except Exception:
+                missing_xpaths.append(xpath)
+
+        if missing_xpaths:
+            missing_text = "\n".join(f"- {xpath}" for xpath in missing_xpaths)
+            raise RuntimeError(
+                "Missing required XPath element(s) after click flow:\n"
+                f"{missing_text}"
+            )
 
         _save_full_page_screenshot(browser_driver, abs_output)
         log_ok(f"Post-click window screenshot saved: {abs_output}")
